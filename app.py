@@ -349,11 +349,12 @@ def health():
     })
 
 if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5001))
+    # Render sets PORT automatically, default to 10000 for cloud deployment
+    port = int(os.getenv('PORT', 10000))
     debug = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
     
     logger.info("=" * 60)
-    logger.info("🚀 Starting Web Chatbot Application")
+    logger.info(f"🚀 Starting Web Chatbot Application on port {port}")
     logger.info("=" * 60)
     
     app.run(
