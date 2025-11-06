@@ -257,6 +257,16 @@ def chat():
         if not user_message:
             return jsonify({'error': 'Message cannot be empty'}), 400
         
+        # Check message limit (10 messages = 5 user + 5 AI exchanges)
+        chat_history = session.get('chat_history', [])
+        if len(chat_history) >= 10:
+            return jsonify({
+                'response': "You've reached the free message limit (10 messages). Upgrade to Premium for unlimited conversations! 🚀",
+                'limit_reached': True,
+                'quick_replies': [],
+                'success': True
+            })
+        
         logger.info(f"📨 User: {user_message}")
         
         # Quick responses for button clicks (no AI needed - instant!)

@@ -3,7 +3,6 @@ const chatContainer = document.getElementById('chatContainer');
 const messagesDiv = document.getElementById('messages');
 const userInput = document.getElementById('userInput');
 const sendBtn = document.getElementById('sendBtn');
-const loadingOverlay = document.getElementById('loadingOverlay');
 const charCount = document.getElementById('charCount');
 
 // Auto-resize textarea
@@ -62,8 +61,8 @@ async function sendMessage() {
     userInput.style.height = 'auto';
     charCount.textContent = '0/1000';
     
-    // Show loading
-    loadingOverlay.style.display = 'flex';
+    // Show inline thinking indicator (ChatGPT style)
+    const thinkingMsg = addThinkingIndicator();
     
     try {
         // Send to backend
@@ -77,32 +76,81 @@ async function sendMessage() {
         
         const data = await response.json();
         
+        // Remove thinking indicator
+        thinkingMsg.remove();
+        
         console.log('📦 Backend response:', data);
         console.log('🎯 Quick replies received:', data.quick_replies);
         
         if (data.success) {
-            // Add AI response
-            addMessage(data.response, 'ai', data.quick_replies);
+            // Check if premium limit reached
+            if (data.limit_reached) {
+                addPremiumMessage(data.response);
+            } else {
+                // Add AI response
+                addMessage(data.response, 'ai', data.quick_replies);
+            }
         } else {
             addMessage('Sorry, something went wrong. Please try again.', 'ai');
         }
         
     } catch (error) {
         console.error('Error:', error);
+        // Remove thinking indicator on error
+        const thinking = document.querySelector('.ai-message.thinking-message');
+        if (thinking) thinking.remove();
         addMessage('Sorry, I couldn\'t connect to the server. Please try again.', 'ai');
     } finally {
-        // Hide loading and re-enable input
-        loadingOverlay.style.display = 'none';
+        // Re-enable input
         sendBtn.disabled = false;
         userInput.disabled = false;
         userInput.focus();
     }
 }
 
+// Add thinking indicator (ChatGPT style)
+function addThinkingIndicator() {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message ai-message thinking-message';
+    
+    const avatar = document.createElement('div');
+    avatar.className = 'message-avatar';
+    avatar.textContent = '🤖';
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    
+    const thinkingDiv = document.createElement('div');
+    thinkingDiv.className = 'thinking';
+    thinkingDiv.innerHTML = '<div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div>';
+    
+    contentDiv.appendChild(thinkingDiv);
+    messageDiv.appendChild(avatar);
+    messageDiv.appendChild(contentDiv);
+    messagesDiv.appendChild(messageDiv);
+    
+    // Scroll to bottom
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+    
+    return messageDiv;
+}
+
+// Add premium upgrade message
+function addPremiumMessage(text) {
+    const premiumDiv = document.createElement('div');
+    premiumDiv.className = 'premium-message';
+    premiumDiv.innerHTML = `
+        <h3>🚀 ${text}</h3>
+        <p>Continue the conversation with unlimited messages, faster responses, and priority support.</p>
+    `;
+    messagesDiv.appendChild(premiumDiv);
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+}
+
 // Add message to chat
 function addMessage(text, type, quickReplies = null) {
     const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${type}`;
+    messageDiv.className = `message ${type}-message`;
     
     const avatar = document.createElement('div');
     avatar.className = 'message-avatar';
