@@ -20,7 +20,7 @@ langchain-community==0.4.1
 openai==2.7.1
 langchain-openai==1.0.2
 google-generativeai==0.8.5
-langchain-google-genai==2.0.10
+langchain-google-genai==2.1.0
 
 # Utilities
 tiktoken==0.12.0
