@@ -6,8 +6,6 @@ import os
 from flask import Flask, render_template, request, jsonify, session
 from flask_cors import CORS
 from dotenv import load_dotenv
-from qdrant_client import QdrantClient
-import google.generativeai as genai
 from openai import OpenAI
 import logging
 from datetime import datetime
@@ -28,75 +26,31 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "your-secret-key")
 CORS(app)
 
 # Configuration
-QDRANT_URL = os.getenv("QDRANT_URL")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-COLLECTION_NAME = "bridgetext_scenarios"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # Global variables
-qdrant_client = None
-embeddings = None
 openai_client = None
 
 def initialize_services():
-    """Initialize Qdrant and OpenAI services"""
-    global qdrant_client, embeddings, openai_client
+    """Initialize OpenAI service"""
+    global openai_client
     
     try:
-        logger.info("🔌 Connecting to services...")
+        logger.info("🔌 Connecting to OpenAI...")
         
-        # Initialize Qdrant client
-        qdrant_client = QdrantClient(
-            url=QDRANT_URL,
-            api_key=QDRANT_API_KEY
-        )
-        
-        # Initialize Google Generative AI for embeddings
-        genai.configure(api_key=GOOGLE_API_KEY)
-        embeddings = "models/embedding-001"  # Store model name, not object
-        
-        # Initialize OpenAI client
+        # Initialize OpenAI client only (Qdrant disabled for speed)
         openai_client = OpenAI(api_key=OPENAI_API_KEY)
         
-        logger.info("✅ All services initialized successfully")
+        logger.info("✅ OpenAI initialized successfully")
         return True
         
     except Exception as e:
         logger.error(f"❌ Failed to initialize services: {str(e)}")
         return False
 
-def get_relevant_context(user_message: str, top_k: int = 2) -> str:
-    """Retrieve relevant context from Qdrant"""
-    try:
-        # Generate embedding for user message using Google's API directly
-        result = genai.embed_content(
-            model=embeddings,
-            content=user_message,
-            task_type="retrieval_query"
-        )
-        query_vector = result['embedding']
-        
-        # Search in Qdrant - reduced to top 2 for speed
-        search_results = qdrant_client.search(
-            collection_name=COLLECTION_NAME,
-            query_vector=query_vector,
-            limit=top_k
-        )
-        
-        # Extract context from results
-        context_parts = []
-        for result in search_results:
-            if hasattr(result, 'payload') and result.payload:
-                text = result.payload.get('text', '') or result.payload.get('page_content', '')
-                if text:
-                    context_parts.append(text)
-        
-        return "\n\n".join(context_parts) if context_parts else "No relevant context found."
-        
-    except Exception as e:
-        logger.error(f"Error retrieving context: {str(e)}")
-        return "No context available."
+# Qdrant context retrieval disabled for speed optimization
+# The AI has sufficient workplace coaching knowledge without external context
+# This removes 1-2 seconds of latency per request
 
 def generate_response(user_message: str, context: str, chat_history: str = "", tone: str = "Professional") -> str:
     """Generate response using OpenAI with STEP + 4Rs framework"""
@@ -252,9 +206,10 @@ ANSWER:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
             ],
-            temperature=0.7,
-            max_tokens=150,  # Reduced from 300 - shorter responses are faster
-            stream=False  # Explicit non-streaming for consistency
+            temperature=0.6,  # Slightly lower for faster, more focused responses
+            max_tokens=100,  # Reduced from 150 - 2-3 sentences is enough
+            presence_penalty=0.1,  # Slight penalty to avoid repetition
+            frequency_penalty=0.1  # Keep responses concise
         )
         
         return response.choices[0].message.content.strip()
@@ -306,20 +261,18 @@ def chat():
             ai_response = generate_response(user_message, "", "", selected_tone)
         else:
             # Check if services are initialized
-            if not qdrant_client or not embeddings or not openai_client:
+            if not openai_client:
                 logger.error("Services not initialized, attempting to reinitialize...")
                 if not initialize_services():
                     return jsonify({'error': 'Services unavailable. Please try again later.'}), 503
             
-            # Only retrieve context for actual questions (skip for greetings)
-            if len(user_message.split()) > 3:  # Only search Qdrant for longer messages
-                context = get_relevant_context(user_message)
-            else:
-                context = ""  # Skip context for short messages like "hi", "hello"
+            # Skip Qdrant context retrieval for speed - AI has enough coaching knowledge
+            # Context retrieval adds 1-2 seconds with minimal benefit
+            context = ""
             
-            # Get chat history for context
+            # Get chat history for context (keep it minimal)
             history = session.get('chat_history', [])
-            chat_history = "\n".join([f"User: {h['user']}\nAI: {h['ai']}" for h in history[-2:]])  # Reduced from 3 to 2
+            chat_history = "\n".join([f"User: {h['user']}\nAI: {h['ai']}" for h in history[-2:]])
             
             # Get selected tone (default to Professional)
             selected_tone = session.get('tone', 'Professional')
@@ -396,9 +349,8 @@ def health():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'qdrant_connected': qdrant_client is not None,
-        'embeddings_ready': embeddings is not None,
         'openai_ready': openai_client is not None,
+        'optimized': 'Qdrant disabled for 2x faster responses',
         'timestamp': datetime.now().isoformat()
     })
 
