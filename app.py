@@ -6,6 +6,8 @@ import os
 from flask import Flask, render_template, request, jsonify, session
 from flask_cors import CORS
 from dotenv import load_dotenv
+from qdrant_client import QdrantClient
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from openai import OpenAI
 import logging
 from datetime import datetime
@@ -26,60 +28,80 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "your-secret-key")
 CORS(app)
 
 # Configuration
+QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+COLLECTION_NAME = "bridgetext_scenarios"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # Global variables
+qdrant_client = None
+embeddings = None
 openai_client = None
 
 def initialize_services():
-    """Initialize OpenAI service"""
-    global openai_client
+    """Initialize Qdrant and OpenAI services"""
+    global qdrant_client, embeddings, openai_client
     
     try:
-        logger.info("🔌 Connecting to OpenAI...")
+        logger.info("🔌 Connecting to services...")
         
-        # Initialize OpenAI client only (Qdrant disabled for speed)
+        # Initialize Qdrant client
+        qdrant_client = QdrantClient(
+            url=QDRANT_URL,
+            api_key=QDRANT_API_KEY
+        )
+        
+        # Initialize Google embeddings (768 dimensions to match your collection)
+        embeddings = GoogleGenerativeAIEmbeddings(
+            model="models/embedding-001",
+            google_api_key=GOOGLE_API_KEY
+        )
+        
+        # Initialize OpenAI client
         openai_client = OpenAI(api_key=OPENAI_API_KEY)
         
-        logger.info("✅ OpenAI initialized successfully")
+        logger.info("✅ All services initialized successfully")
         return True
         
     except Exception as e:
         logger.error(f"❌ Failed to initialize services: {str(e)}")
         return False
 
-# Qdrant context retrieval disabled for speed optimization
-# The AI has sufficient workplace coaching knowledge without external context
-# This removes 1-2 seconds of latency per request
+def get_relevant_context(user_message: str, top_k: int = 3) -> str:
+    """Retrieve relevant context from Qdrant"""
+    try:
+        # Generate embedding for user message
+        query_vector = embeddings.embed_query(user_message)
+        
+        # Search in Qdrant
+        search_results = qdrant_client.search(
+            collection_name=COLLECTION_NAME,
+            query_vector=query_vector,
+            limit=top_k
+        )
+        
+        # Extract context from results
+        context_parts = []
+        for result in search_results:
+            if hasattr(result, 'payload') and result.payload:
+                text = result.payload.get('text', '') or result.payload.get('page_content', '')
+                if text:
+                    context_parts.append(text)
+        
+        return "\n\n".join(context_parts) if context_parts else "No relevant context found."
+        
+    except Exception as e:
+        logger.error(f"Error retrieving context: {str(e)}")
+        return "No context available."
 
 def generate_response(user_message: str, context: str, chat_history: str = "", tone: str = "Professional") -> str:
     """Generate response using OpenAI with STEP + 4Rs framework"""
     try:
-        # Special handling for tone selection - instant response, no AI needed
+        # Special handling for tone selection
         if user_message.strip() in ["Professional", "Casual"]:
             selected_tone = user_message.strip()
             return f"Got it — I'll reply in a {selected_tone} tone. How can I help today?"
-        
-        # Quick replies for topics - instant response, no AI needed
-        if user_message.strip() in ["Work relationships", "Stress & deadlines", "Career growth", "Team conflicts"]:
-            return f"Let's talk about {user_message.lower()}. What's going on?"
-        
-        # SAFETY CHECK: Detect harmful/dangerous content
-        harmful_keywords = ['kill', 'killed', 'murder', 'suicide', 'abuse', 'violence', 'assault', 'harass', 'threat', 'weapon', 'gun', 'knife', 'blood', 'attack', 'stab']
-        message_lower = user_message.lower()
-        
-        if any(keyword in message_lower for keyword in harmful_keywords):
-            return ("⚠️ I'm concerned about what you've shared. If you're in immediate danger or witnessing illegal activity, please contact:\n\n"
-                   "• Emergency Services: 911\n"
-                   "• National Suicide Prevention Lifeline: 988\n"
-                   "• Workplace Violence Hotline: 1-800-799-7233\n\n"
-                   "I'm designed to help with workplace communication challenges, not crisis or safety situations. Please reach out to professionals who can provide proper support.")
-        
-        # OFF-TOPIC CHECK: Detect personal health/medical issues
-        health_keywords = ['headache', 'sick', 'pain', 'fever', 'medication', 'doctor', 'hospital', 'injury', 'hurt']
-        
-        if any(keyword in message_lower for keyword in health_keywords):
-            return ("I'm specifically designed for workplace communication challenges. For health concerns, please consult a medical professional. Can we focus on a work-related communication or teamwork challenge instead?")
         
         # Define tone-specific instructions
         if tone == "Casual":
@@ -117,19 +139,8 @@ You are a Gen Z workplace coach chatbot. Your role is to guide young professiona
 • Always emphasize what is within their personal control.
 • Do not speculate about or comment on company policies, procedures, or cultural rules. If the user brings these up, steer back to what they can do in their role.
 • Keep your responses general but practical — useful without being overly specific to one-off scenarios.
-
-🚨 CRITICAL SAFETY BOUNDARIES:
-• This is a WORKPLACE COACHING bot ONLY. You cannot help with:
-  - Personal health issues (headaches, illness, medical advice)
-  - Mental health crises (depression, anxiety disorders, trauma)
-  - Illegal activities (violence, harassment, assault, threats)
-  - Personal relationships outside work (family, romantic, friends)
-  - Financial, legal, or housing problems
-  
-• If user mentions ANY of the above, respond:
-  "I'm specifically designed for workplace communication challenges. For [health/legal/personal] issues, please consult appropriate professionals. Can we focus on a work-related communication or teamwork challenge instead?"
-  
-• NEVER engage with dangerous content casually. If violence/illegal activity is mentioned, immediately direct to authorities.
+• Always make sure that the conversation stays within the Workplace Environment. If user goes Off-topic steer back the conversation on Track and if user doesn't agree make sure you just politely decline and say I'm not capable of providing solutions out of Workplace Environment.
+• Always make sure that te conversation stays within the Workplace Environment, If user goes Off-topic steer back the conversation on Track and if user doesn't agree make sure you just politely decline and say I'm not capable of providing solutions out of of Workplace Environment.
 
 ⸻
 
@@ -206,10 +217,8 @@ ANSWER:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
             ],
-            temperature=0.6,  # Slightly lower for faster, more focused responses
-            max_tokens=100,  # Reduced from 150 - 2-3 sentences is enough
-            presence_penalty=0.1,  # Slight penalty to avoid repetition
-            frequency_penalty=0.1  # Keep responses concise
+            temperature=0.7,
+            max_tokens=300
         )
         
         return response.choices[0].message.content.strip()
@@ -240,45 +249,26 @@ def chat():
         if not user_message:
             return jsonify({'error': 'Message cannot be empty'}), 400
         
-        # Check message limit (10 messages = 5 user + 5 AI exchanges)
-        chat_history = session.get('chat_history', [])
-        if len(chat_history) >= 10:
-            return jsonify({
-                'response': "You've reached the free message limit (10 messages). Upgrade to Premium for unlimited conversations! 🚀",
-                'limit_reached': True,
-                'quick_replies': [],
-                'success': True
-            })
-        
         logger.info(f"📨 User: {user_message}")
         
-        # Quick responses for button clicks (no AI needed - instant!)
-        if user_message in ["Professional", "Casual", "Work relationships", "Stress & deadlines", "Career growth", "Team conflicts"]:
-            # Get selected tone for context
-            selected_tone = session.get('tone', 'Professional')
-            
-            # Generate instant response without AI
-            ai_response = generate_response(user_message, "", "", selected_tone)
-        else:
-            # Check if services are initialized
-            if not openai_client:
-                logger.error("Services not initialized, attempting to reinitialize...")
-                if not initialize_services():
-                    return jsonify({'error': 'Services unavailable. Please try again later.'}), 503
-            
-            # Skip Qdrant context retrieval for speed - AI has enough coaching knowledge
-            # Context retrieval adds 1-2 seconds with minimal benefit
-            context = ""
-            
-            # Get chat history for context (keep it minimal)
-            history = session.get('chat_history', [])
-            chat_history = "\n".join([f"User: {h['user']}\nAI: {h['ai']}" for h in history[-2:]])
-            
-            # Get selected tone (default to Professional)
-            selected_tone = session.get('tone', 'Professional')
-            
-            # Generate response using OpenAI with the selected tone
-            ai_response = generate_response(user_message, context, chat_history, selected_tone)
+        # Check if services are initialized
+        if not qdrant_client or not embeddings or not openai_client:
+            logger.error("Services not initialized, attempting to reinitialize...")
+            if not initialize_services():
+                return jsonify({'error': 'Services unavailable. Please try again later.'}), 503
+        
+        # Get relevant context from Qdrant
+        context = get_relevant_context(user_message)
+        
+        # Get chat history for context
+        history = session.get('chat_history', [])
+        chat_history = "\n".join([f"User: {h['user']}\nAI: {h['ai']}" for h in history[-3:]])  # Last 3 exchanges
+        
+        # Get selected tone (default to Professional)
+        selected_tone = session.get('tone', 'Professional')
+        
+        # Generate response using OpenAI with the selected tone
+        ai_response = generate_response(user_message, context, chat_history, selected_tone)
         
         # Store in session history
         if 'chat_history' not in session:
@@ -293,19 +283,52 @@ def chat():
         
         logger.info(f"✅ AI: {ai_response[:100]}...")
         
-        # Two-step quick reply flow
+        # Three-step quick reply flow
         quick_replies = []
         chat_length = len(session.get('chat_history', []))
         
-        # Step 1: First message - offer tone selection
+        # Step 1: First message (greeting) - NO buttons yet, just greet
         if chat_length == 1:
-            quick_replies = ["Professional", "Casual"]
-            logger.info("🎯 Step 1: Sending tone selection buttons")
+            # Check if first message is just a greeting (hi, hello, hey, etc.)
+            greeting_words = ['hi', 'hello', 'hey', 'hii', 'hiii', 'sup', 'yo']
+            first_msg = user_message.lower().strip()
+            if first_msg in greeting_words:
+                # Just greet, no tone buttons yet
+                quick_replies = []
+                logger.info("👋 Step 1: Greeting detected, no buttons shown")
+            else:
+                # User asked a real question first - show tone buttons
+                quick_replies = ["Professional", "Casual"]
+                logger.info("🎯 Step 1: Problem detected on first message, showing tone buttons")
         
-        # Step 2: After tone is selected - offer topic buttons
+        # Step 2: When user asks their problem/challenge - offer tone selection
         elif chat_length == 2:
-            # Check if user selected a tone
-            user_tone = session['chat_history'][1]['user'].strip()
+            # Check if previous message was just greeting
+            prev_msg = session['chat_history'][0]['user'].lower().strip()
+            greeting_words = ['hi', 'hello', 'hey', 'hii', 'hiii', 'sup', 'yo']
+            
+            if prev_msg in greeting_words:
+                # Now they're asking their problem - show tone buttons
+                quick_replies = ["Professional", "Casual"]
+                logger.info("🎯 Step 2: User shared problem, showing tone buttons")
+            else:
+                # They selected tone on previous step - show topics
+                user_tone = session['chat_history'][1]['user'].strip()
+                if user_tone in ["Professional", "Casual"]:
+                    quick_replies = [
+                        "Work relationships",
+                        "Stress & deadlines",
+                        "Career growth",
+                        "Team conflicts"
+                    ]
+                    session['tone'] = user_tone
+                    session.modified = True
+                    logger.info(f"🎯 Step 2: Tone '{user_tone}' selected, sending topic buttons")
+        
+        # Step 3: After tone is selected - offer topic buttons
+        elif chat_length == 3:
+            # Check if user selected a tone in the previous message
+            user_tone = session['chat_history'][2]['user'].strip()
             if user_tone in ["Professional", "Casual"]:
                 quick_replies = [
                     "Work relationships",
@@ -316,7 +339,7 @@ def chat():
                 # Store selected tone in session
                 session['tone'] = user_tone
                 session.modified = True
-                logger.info(f"🎯 Step 2: Tone '{user_tone}' selected, sending topic buttons")
+                logger.info(f"🎯 Step 3: Tone '{user_tone}' selected, sending topic buttons")
         
         return jsonify({
             'response': ai_response,
@@ -349,18 +372,18 @@ def health():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
+        'qdrant_connected': qdrant_client is not None,
+        'embeddings_ready': embeddings is not None,
         'openai_ready': openai_client is not None,
-        'optimized': 'Qdrant disabled for 2x faster responses',
         'timestamp': datetime.now().isoformat()
     })
 
 if __name__ == '__main__':
-    # Render sets PORT automatically, default to 10000 for cloud deployment
-    port = int(os.getenv('PORT', 10000))
+    port = int(os.getenv('PORT', 5001))
     debug = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
     
     logger.info("=" * 60)
-    logger.info(f"🚀 Starting Web Chatbot Application on port {port}")
+    logger.info("🚀 Starting Web Chatbot Application")
     logger.info("=" * 60)
     
     app.run(
