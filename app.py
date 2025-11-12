@@ -198,23 +198,33 @@ Use these frameworks:
 
 ⸻
 
-🎯 FORMATTING RULES (CRITICAL):
+🎯 CRITICAL FORMATTING RULE - BULLETS MUST BE ON SEPARATE LINES:
 
-**DO NOT use numbered lists like "1. 2. 3."**
-Instead use this format:
+**NEVER use numbered lists (1. 2. 3. 4.)**
+**ALWAYS use bullet points (•) with LINE BREAKS between each point**
 
-✅ CORRECT FORMAT:
-"Ugh that sounds rough. Here's how to handle this using STEP:
+Each bullet point MUST start on a NEW LINE. This is MANDATORY.
 
-• **Spot** - Figure out which tasks are actually urgent vs just feeling urgent
-• **Think** - Your boss probably doesn't realize they're overloading you
-• **Engage** - Ask for a quick 15-min chat to review priorities
-• **Perform** - Track your progress and show you can handle it
+✅ CORRECT FORMAT (Each bullet on separate line):
+"Ugh that sounds rough. Here's how to handle it with STEP:
 
-If it doesn't improve, escalate to their manager. Sound good?"
+• **Spot** - Figure out which tasks are urgent vs just feeling urgent
 
-❌ WRONG FORMAT (Don't do this):
-"Let's use STEP: 1. Spot - List the tasks 2. Think - Consider if he knows 3. Engage - Set up a chat..."
+• **Think** - Your boss might not know they're overloading you
+
+• **Engage** - Ask for a quick 15-min priority check
+
+• **Perform** - Track progress and escalate if needed
+
+Sound good?"
+
+❌ WRONG (Bullets inline, no line breaks):
+"Here's STEP: • **Spot** - ... • **Think** - ... • **Engage** - ..."
+
+❌ WRONG (Using numbers):
+"1. **Spot** - ... 2. **Think** - ..."
+
+EACH BULLET (•) MUST BE ON ITS OWN LINE WITH A BLANK LINE AFTER IT.
 
 ⸻
 
@@ -226,20 +236,19 @@ If it doesn't improve, escalate to their manager. Sound good?"
 🎯 CONVERSATION RULES:
 
 1. **When user selects tone (Professional/Casual)**: 
-   - DON'T just say "Let's tackle this!"
-   - IMMEDIATELY address their problem using their selected tone
-   - Look at chat history to see what they asked about
+   - Look at chat history to see their problem
+   - IMMEDIATELY address it in their selected tone
+   - Don't make them repeat themselves
 
-2. **After 1 clarifying question, give actionable advice**
-   - Stop asking endless questions
-   - Jump straight to STEP or 4Rs framework
+2. **Give actionable advice quickly**
+   - After 1 question, jump to STEP or 4Rs
+   - Use bullet points (•) with line breaks, never numbers
 
-3. **Use bullet points (•), never numbered lists (1. 2. 3.)**
-
-4. **Keep responses conversational**
+3. **Keep it conversational**
    - 3-5 bullet points max
-   - Each bullet = 1-2 short sentences
-   - End with a casual question like "Sound good?" or "Worth trying?"
+   - Each bullet = 1-2 sentences
+   - Add blank line after each bullet
+   - End with "Sound good?" or "Worth trying?"
 
 ⸻
 
@@ -252,7 +261,7 @@ If it doesn't improve, escalate to their manager. Sound good?"
 **USER JUST SAID:**
 {user_message}
 
-**YOUR RESPONSE (Use bullets •, be direct, match the tone):**"""
+**YOUR RESPONSE (USE BULLETS • WITH LINE BREAKS, NOT INLINE):**"""
 
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",  # Using GPT-4o-mini for smarter responses
@@ -343,6 +352,9 @@ def chat():
         # DON'T show buttons if the response is a safety warning
         is_safety_warning = ai_response.startswith("⚠️") or "call 911" in ai_response.lower()
         
+        # Check if user hasn't selected tone yet
+        has_selected_tone = 'tone' in session and session['tone'] in ["Professional", "Casual"]
+        
         quick_replies = []
         chat_length = len(session.get('chat_history', []))
         
@@ -350,6 +362,15 @@ def chat():
             # Never show buttons after safety warnings
             quick_replies = []
             logger.info("⚠️ Safety warning issued, no buttons shown")
+        # If tone not selected yet and we have a real problem (not greeting), ask for tone
+        elif not has_selected_tone and chat_length >= 2:
+            # Check if current message is a real problem (not just greeting)
+            greeting_words = ['hi', 'hello', 'hey', 'hii', 'hiii', 'sup', 'yo']
+            if user_message.lower().strip() not in greeting_words:
+                # Check if previous response wasn't already asking for tone
+                if "Before we dive in" not in session['chat_history'][-1]['ai']:
+                    quick_replies = ["Professional", "Casual"]
+                    logger.info("🎯 No tone selected yet, showing tone buttons")
         # Step 1: First message (greeting) - NO buttons yet, just greet
         elif chat_length == 1:
             # Check if first message is just a greeting (hi, hello, hey, etc.)
@@ -433,8 +454,11 @@ def get_history():
 
 @app.route('/api/clear', methods=['POST'])
 def clear_history():
-    """Clear chat history"""
+    """Clear chat history and reset tone preference"""
     session['chat_history'] = []
+    # Also clear the tone preference so user gets asked again
+    if 'tone' in session:
+        del session['tone']
     session.modified = True
     return jsonify({'success': True, 'message': 'Chat history cleared'})
 
