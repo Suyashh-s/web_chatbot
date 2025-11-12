@@ -6,7 +6,10 @@ gunicorn==21.2.0
 # Environment & Configuration
 python-dotenv==1.0.0
 
-# AI/ML Integrations (OpenAI only for speed)
+# Vector Database
+qdrant-client==1.15.1
+
+# AI/ML Integrations (OpenAI for embeddings + chat)
 openai>=2.0.0,<3.0.0
 
 # Utilities

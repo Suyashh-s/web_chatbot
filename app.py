@@ -1,11 +1,12 @@
 """
-Simple Web Chatbot - OpenAI only (optimized for speed)
+Simple Web Chatbot - Uses Qdrant for context retrieval with OpenAI embeddings
 """
 
 import os
 from flask import Flask, render_template, request, jsonify, session
 from flask_cors import CORS
 from dotenv import load_dotenv
+from qdrant_client import QdrantClient
 from openai import OpenAI
 import logging
 from datetime import datetime
@@ -26,30 +27,71 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "your-secret-key")
 CORS(app)
 
 # Configuration
+QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+COLLECTION_NAME = "bridgetext_scenarios"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Global variables
+qdrant_client = None
 openai_client = None
 
 def initialize_services():
-    """Initialize OpenAI service"""
-    global openai_client
+    """Initialize Qdrant and OpenAI services"""
+    global qdrant_client, openai_client
     
     try:
-        logger.info("🔌 Connecting to OpenAI...")
+        logger.info("🔌 Connecting to services...")
         
-        # Initialize OpenAI client
+        # Initialize Qdrant client
+        qdrant_client = QdrantClient(
+            url=QDRANT_URL,
+            api_key=QDRANT_API_KEY
+        )
+        
+        # Initialize OpenAI client (for embeddings AND chat)
         openai_client = OpenAI(api_key=OPENAI_API_KEY)
         
-        logger.info("✅ OpenAI initialized successfully")
+        logger.info("✅ All services initialized successfully")
         return True
         
     except Exception as e:
         logger.error(f"❌ Failed to initialize services: {str(e)}")
         return False
 
-def generate_response(user_message: str, chat_history: str = "", tone: str = "Professional") -> str:
-    """Generate response using OpenAI with STEP + 4Rs framework (NO context retrieval for speed)"""
+def get_relevant_context(user_message: str, top_k: int = 3) -> str:
+    """Retrieve relevant context from Qdrant using OpenAI embeddings"""
+    try:
+        # Generate embedding using OpenAI (text-embedding-3-small model)
+        embedding_response = openai_client.embeddings.create(
+            model="text-embedding-3-small",
+            input=user_message
+        )
+        query_vector = embedding_response.data[0].embedding
+        
+        # Search in Qdrant
+        search_results = qdrant_client.search(
+            collection_name=COLLECTION_NAME,
+            query_vector=query_vector,
+            limit=top_k
+        )
+        
+        # Extract context from results
+        context_parts = []
+        for result in search_results:
+            if hasattr(result, 'payload') and result.payload:
+                text = result.payload.get('text', '') or result.payload.get('page_content', '')
+                if text:
+                    context_parts.append(text)
+        
+        return "\n\n".join(context_parts) if context_parts else "No relevant context found."
+        
+    except Exception as e:
+        logger.error(f"Error retrieving context: {str(e)}")
+        return "No context available."
+
+def generate_response(user_message: str, context: str, chat_history: str = "", tone: str = "Professional") -> str:
+    """Generate response using GPT-4o-mini with STEP + 4Rs framework and Qdrant context"""
     try:
         # Safety check - Harmful content
         harmful_keywords = ['kill', 'murder', 'suicide', 'violence', 'assault', 'weapon', 'gun', 'knife', 'blood', 'attack', 'stab', 'abuse', 'threat', 'harass']
@@ -170,6 +212,9 @@ Stay focused - get to the framework quickly, don't drag out empathy phase
 End efficiently - quick wrap-up, don't over-explain
 Your goal: Sound like a helpful friend who knows their stuff, not a customer service bot or corporate trainer answer as humans would have answered and repond with empathy.
 
+CONTEXT (Reference coaching scenarios from your dataset):
+{context}
+
 CHAT_HISTORY:
 {chat_history}
 
@@ -178,7 +223,7 @@ ANSWER:
 </s>[INST]"""
 
         response = openai_client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",  # Using GPT-4o-mini for smarter responses
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
@@ -218,7 +263,7 @@ def chat():
         logger.info(f"📨 User: {user_message}")
         
         # Check if services are initialized
-        if not openai_client:
+        if not qdrant_client or not openai_client:
             logger.error("Services not initialized, attempting to reinitialize...")
             if not initialize_services():
                 return jsonify({'error': 'Services unavailable. Please try again later.', 'success': False}), 503
@@ -233,6 +278,9 @@ def chat():
                 'success': True
             })
         
+        # Get relevant context from Qdrant using OpenAI embeddings
+        context = get_relevant_context(user_message)
+        
         # Get chat history for context
         history = session.get('chat_history', [])
         chat_history = "\n".join([f"User: {h['user']}\nAI: {h['ai']}" for h in history[-2:]])  # Last 2 exchanges
@@ -240,8 +288,8 @@ def chat():
         # Get selected tone (default to Professional)
         selected_tone = session.get('tone', 'Professional')
         
-        # Generate response using OpenAI with the selected tone (NO Qdrant context retrieval)
-        ai_response = generate_response(user_message, chat_history, selected_tone)
+        # Generate response using GPT-4o-mini with Qdrant context
+        ai_response = generate_response(user_message, context, chat_history, selected_tone)
         
         # Store in session history
         if 'chat_history' not in session:
@@ -345,8 +393,10 @@ def health():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
+        'qdrant_connected': qdrant_client is not None,
         'openai_ready': openai_client is not None,
-        'optimized': 'Qdrant disabled for 2x faster responses',
+        'model': 'gpt-4o-mini',
+        'embeddings': 'text-embedding-3-small',
         'timestamp': datetime.now().isoformat()
     })
 
