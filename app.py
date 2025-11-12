@@ -149,10 +149,28 @@ I'm designed to help with workplace communication challenges, not crisis or safe
         if chat_length == 3:
             return "Before we dive in — how would you like me to respond? Pick the style that feels right for you."
         
-        # Special handling for tone selection
+        # Special handling for tone selection - Use chat history to continue the conversation
         if user_message.strip() in ["Professional", "Casual"]:
             selected_tone = user_message.strip()
-            return f"Perfect! I'll keep it {selected_tone.lower()}. Let's tackle this together."
+            
+            # Get the user's last substantive message (not just tone selection)
+            if chat_history:
+                # Extract the last user message from chat history
+                history_lines = chat_history.strip().split('\n')
+                last_user_msg = None
+                for line in reversed(history_lines):
+                    if line.startswith('User:'):
+                        last_user_msg = line.replace('User:', '').strip()
+                        break
+                
+                # If we found their problem, respond to it directly in the selected tone
+                if last_user_msg and last_user_msg not in ["Professional", "Casual"]:
+                    # Don't just acknowledge tone - jump straight into helping with their problem
+                    # The system prompt will handle the tone, just return empty to let GPT respond
+                    pass  # Let it fall through to normal GPT response
+            
+            # If no context, just acknowledge
+            return f"Perfect! I'll keep it {selected_tone.lower()}. What's going on?"
         
         # Define tone-specific instructions
         if tone == "Casual":
@@ -172,59 +190,69 @@ I'm designed to help with workplace communication challenges, not crisis or safe
 • Example professional response: "That's a challenging situation. It sounds like communication barriers are impacting your work. Have you had an opportunity to address this directly with your colleague?"
 """
         
-        system_prompt = f"""You are a Gen Z workplace coach. Your job is to help young professionals handle workplace challenges using TWO frameworks:
+        system_prompt = f"""You are a Gen Z workplace coach helping young professionals with work challenges.
 
-**STEP Framework** (Adaptability): Spot → Think → Engage → Perform
-**4Rs Framework** (Emotional Intelligence): Recognize → Regulate → Respect → Reflect
+Use these frameworks:
+• STEP (Adaptability): Spot → Think → Engage → Perform
+• 4Rs (Emotional Intelligence): Recognize → Regulate → Respect → Reflect
 
 ⸻
 
-🎯 CRITICAL RULES:
+🎯 FORMATTING RULES (CRITICAL):
 
-1. **BE DIRECT & ACTIONABLE** - After 1 clarifying question, jump straight to practical advice using STEP or 4Rs.
+**DO NOT use numbered lists like "1. 2. 3."**
+Instead use this format:
 
-2. **FORMAT YOUR RESPONSES PROPERLY**:
-   - Use bullet points (•) for lists
-   - Use numbered lists (1., 2., 3.) when explaining steps in order
-   - Add line breaks between sections for readability
-   - Keep each bullet point concise (1-2 lines max)
+✅ CORRECT FORMAT:
+"Ugh that sounds rough. Here's how to handle this using STEP:
 
-3. **MATCH THE TONE**:
+• **Spot** - Figure out which tasks are actually urgent vs just feeling urgent
+• **Think** - Your boss probably doesn't realize they're overloading you
+• **Engage** - Ask for a quick 15-min chat to review priorities
+• **Perform** - Track your progress and show you can handle it
+
+If it doesn't improve, escalate to their manager. Sound good?"
+
+❌ WRONG FORMAT (Don't do this):
+"Let's use STEP: 1. Spot - List the tasks 2. Think - Consider if he knows 3. Engage - Set up a chat..."
+
+⸻
+
+🎯 TONE:
 {tone_instruction}
 
-4. **AVOID QUESTION LOOPS** - Don't ask endless questions. Give actionable advice quickly.
+⸻
 
-5. **USE THE DATASET CONTEXT** - Reference the workplace scenarios to give specific advice.
+🎯 CONVERSATION RULES:
+
+1. **When user selects tone (Professional/Casual)**: 
+   - DON'T just say "Let's tackle this!"
+   - IMMEDIATELY address their problem using their selected tone
+   - Look at chat history to see what they asked about
+
+2. **After 1 clarifying question, give actionable advice**
+   - Stop asking endless questions
+   - Jump straight to STEP or 4Rs framework
+
+3. **Use bullet points (•), never numbered lists (1. 2. 3.)**
+
+4. **Keep responses conversational**
+   - 3-5 bullet points max
+   - Each bullet = 1-2 short sentences
+   - End with a casual question like "Sound good?" or "Worth trying?"
 
 ⸻
 
-**RESPONSE FORMAT EXAMPLES:**
-
-✅ GOOD (Casual, Structured):
-"Ugh that's rough. Here's what you can try using the STEP method:
-
-1. **Spot** - Identify which tasks are actually urgent vs just feeling urgent
-2. **Think** - Your boss might not realize they're overloading you. They probably think you'll speak up if it's too much
-3. **Engage** - Schedule a quick 15-min chat: 'Hey, I want to make sure I'm prioritizing right. Can we review what's most urgent?'
-4. **Perform** - Track your progress and show you're handling it. If it doesn't improve, escalate
-
-Worth trying?"
-
-❌ BAD (No structure, wall of text):
-"That's tough. Try the STEP method: Spot what tasks are overwhelming you, Think about prioritizing them which ones are urgent, Engage by setting a meeting with your boss to discuss workload and ask for clarity on priorities, Perform by tracking your progress to show you've got it under control."
-
-⸻
-
-**CONTEXT FROM DATASET:**
+**CONTEXT FROM YOUR DATASET:**
 {context}
 
-**CHAT HISTORY:**
+**PREVIOUS CONVERSATION:**
 {chat_history}
 
-**USER'S MESSAGE:**
+**USER JUST SAID:**
 {user_message}
 
-**YOUR RESPONSE (Use bullet points/numbered lists, be direct and actionable):**"""
+**YOUR RESPONSE (Use bullets •, be direct, match the tone):**"""
 
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",  # Using GPT-4o-mini for smarter responses
@@ -285,9 +313,9 @@ def chat():
         # Get relevant context from Qdrant using OpenAI embeddings
         context = get_relevant_context(user_message)
         
-        # Get chat history for context
+        # Get chat history for context - Include MORE history (last 4 exchanges instead of 2)
         history = session.get('chat_history', [])
-        chat_history = "\n".join([f"User: {h['user']}\nAI: {h['ai']}" for h in history[-2:]])  # Last 2 exchanges
+        chat_history = "\n".join([f"User: {h['user']}\nAI: {h['ai']}" for h in history[-4:]])  # Last 4 exchanges for better context
         
         # Get selected tone (default to Professional)
         selected_tone = session.get('tone', 'Professional')
