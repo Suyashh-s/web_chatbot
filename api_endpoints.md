@@ -13,7 +13,9 @@ This is a **Flask REST API backend** for an AI-powered workplace coaching chatbo
 * **10-message free limit** with premium upgrade prompt
 * **Session-based chat history** with Flask sessions
 * **Safety boundaries** for harmful content and off-topic queries
-* **OpenAI GPT-3.5-turbo** for intelligent responses
+* **OpenAI GPT-4o-mini** for intelligent, contextual responses
+* **Qdrant vector database** for RAG (Retrieval-Augmented Generation)
+* **HTML-formatted responses** with bold text and bullet points
 * **Fast responses** (1-2 seconds) optimized for speed
 
 ---
@@ -70,7 +72,7 @@ curl http://localhost:10000/
 
 ```json
 {
-  "response": "That sounds really overwhelming. What's the biggest deadline pressuring you right now?",
+  "response": "That sounds really overwhelming. Here's how to tackle it using STEP:<br><br>• <b>Spot</b> - Which deadline is most urgent?<br>• <b>Think</b> - Can you break tasks into smaller chunks?<br>• <b>Engage</b> - Ask your manager to prioritize<br>• <b>Perform</b> - Track progress and adjust<br><br>Want help with any specific step?",
   "quick_replies": [],
   "success": true
 }
@@ -210,10 +212,92 @@ curl http://localhost:10000/
 {
   "status": "healthy",
   "openai_ready": true,
-  "optimized": "Qdrant disabled for 2x faster responses",
-  "timestamp": "2025-11-11T10:45:30.123456"
+  "qdrant_ready": true,
+  "timestamp": "2025-11-13T10:45:30.123456"
 }
 ```
+
+---
+
+## ⚠️ **IMPORTANT: HTML Formatting in Responses**
+
+### **What the API Returns**
+
+All AI responses contain **HTML formatting** that must be rendered properly:
+
+**Example API Response:**
+```json
+{
+  "response": "Here's how to handle it using STEP:<br><br>• <b>Spot</b> - Identify the issue<br>• <b>Think</b> - Consider perspectives<br>• <b>Engage</b> - Take action<br>• <b>Perform</b> - Review outcomes",
+  "success": true
+}
+```
+
+### **HTML Tags Used**
+
+| Tag | Purpose | Example |
+|-----|---------|---------|
+| `<b>` | **Bold text** | `<b>Spot</b>` → **Spot** |
+| `<br>` | Line break | `text<br>text` → line break |
+| `<br><br>` | Paragraph break | `intro<br><br>bullets` → double space |
+
+### **Frontend Developer Requirements**
+
+#### ✅ **Option 1: Use `innerHTML` (Recommended)**
+
+```javascript
+// ✅ CORRECT - Renders HTML tags
+messageElement.innerHTML = data.response;
+```
+
+**Result:** Bold text and line breaks render properly
+
+#### ❌ **Option 2: Use `textContent` (WRONG)**
+
+```javascript
+// ❌ WRONG - Shows raw HTML tags
+messageElement.textContent = data.response;
+```
+
+**Result:** User sees `<b>Spot</b>` literally (bad UX!)
+
+### **React/Vue Implementation**
+
+**React:**
+```jsx
+<div 
+  className="message-content" 
+  dangerouslySetInnerHTML={{ __html: data.response }}
+/>
+```
+
+**Vue:**
+```vue
+<div class="message-content" v-html="data.response"></div>
+```
+
+### **Security Note**
+
+✅ **Safe to use `innerHTML`** because:
+- All responses come from your own API (trusted source)
+- No user-generated HTML is injected
+- GPT-4o-mini only outputs `<b>` and `<br>` tags (no scripts, iframes, etc.)
+
+### **Expected Visual Output**
+
+**Raw API Response:**
+```
+"Here's how to handle it using STEP:<br><br>• <b>Spot</b> - Identify the issue<br>• <b>Think</b> - Consider perspectives"
+```
+
+**Rendered in Browser:**
+```
+Here's how to handle it using STEP:
+
+• Spot - Identify the issue
+• Think - Consider perspectives
+```
+(Note: "Spot" and "Think" will be bold)
 
 ---
 
@@ -295,7 +379,7 @@ User describes their workplace challenge → Bot provides coaching using STEP or
 **Response (Casual tone):**
 ```json
 {
-  "response": "Ugh, that's super frustrating. How long has this been happening?",
+  "response": "Ugh, that's super frustrating. Here's what you can do:<br><br>• <b>Recognize</b> - You're feeling undervalued (totally valid!)<br>• <b>Regulate</b> - Don't confront when angry<br>• <b>Respect</b> - Maybe they don't realize they're doing it?<br>• <b>Reflect</b> - Document your work for proof<br><br>Want to talk through how to bring this up?",
   "quick_replies": [],
   "success": true
 }
@@ -304,7 +388,7 @@ User describes their workplace challenge → Bot provides coaching using STEP or
 **Response (Professional tone):**
 ```json
 {
-  "response": "That's a difficult situation. How frequently does this occur, and have you addressed it directly with them?",
+  "response": "That's a difficult situation. Here's a structured approach using the 4Rs:<br><br>• <b>Recognize</b> - Acknowledge your frustration<br>• <b>Regulate</b> - Choose the right time to address this<br>• <b>Respect</b> - Consider their perspective<br>• <b>Reflect</b> - What outcome do you want?<br><br>Would you like guidance on approaching this conversation?",
   "quick_replies": [],
   "success": true
 }
@@ -382,10 +466,17 @@ The chatbot **automatically detects and blocks**:
 - **Regular messages:** 1-2 seconds (OpenAI API call)
 
 ### **AI Model**
-- **Model:** GPT-3.5-turbo
-- **Temperature:** 0.6 (focused, consistent responses)
-- **Max tokens:** 100 (2-3 sentence responses)
-- **Context window:** Includes last 2 exchanges
+- **Model:** GPT-4o-mini (latest OpenAI model for better reasoning)
+- **Embeddings:** text-embedding-3-small (for Qdrant vector search)
+- **Temperature:** 0.7 (balanced creativity and consistency)
+- **Max tokens:** 200 (allows detailed framework explanations)
+- **Context window:** Includes last 4 exchanges for better conversation memory
+
+### **RAG Architecture**
+- **Vector Database:** Qdrant Cloud
+- **Collection:** bridgetext_scenarios
+- **Top-K retrieval:** 3 most relevant context chunks
+- **Embedding dimension:** 1536 (OpenAI text-embedding-3-small)
 
 ---
 
@@ -427,6 +518,21 @@ async function sendMessage(message) {
   } catch (error) {
     console.error('Network error:', error);
   }
+}
+
+// Helper function to display message with HTML rendering
+function displayMessage(text, role) {
+  const messageDiv = document.createElement('div');
+  messageDiv.className = `message ${role}`;
+  
+  const contentDiv = document.createElement('div');
+  contentDiv.className = 'message-content';
+  
+  // ✅ CRITICAL: Use innerHTML to render HTML tags (<b>, <br>)
+  contentDiv.innerHTML = text;  // NOT textContent!
+  
+  messageDiv.appendChild(contentDiv);
+  chatContainer.appendChild(messageDiv);
 }
 
 // Get chat history
@@ -479,7 +585,7 @@ function ChatBot() {
     const data = await res.json();
 
     if (data.success) {
-      // Add AI response
+      // Add AI response (with HTML formatting intact)
       setMessages(prev => [...prev, { text: data.response, role: 'ai' }]);
       setQuickReplies(data.quick_replies || []);
       setLimitReached(data.limit_reached || false);
@@ -503,6 +609,20 @@ function ChatBot() {
     </div>
   );
 }
+
+// MessageList component should use dangerouslySetInnerHTML
+function MessageList({ messages }) {
+  return (
+    <div className="messages">
+      {messages.map((msg, idx) => (
+        <div key={idx} className={`message ${msg.role}`}>
+          {/* ✅ CRITICAL: Render HTML tags */}
+          <div dangerouslySetInnerHTML={{ __html: msg.text }} />
+        </div>
+      ))}
+    </div>
+  );
+}
 ```
 
 ### **Vue.js Example:**
@@ -510,9 +630,13 @@ function ChatBot() {
 ```vue
 <template>
   <div class="chat-container">
-    <div v-for="msg in messages" :key="msg.id" :class="`message ${msg.role}`">
-      {{ msg.text }}
-    </div>
+    <!-- ✅ CRITICAL: Use v-html to render HTML tags -->
+    <div 
+      v-for="msg in messages" 
+      :key="msg.id" 
+      :class="`message ${msg.role}`"
+      v-html="msg.text"
+    ></div>
 
     <div v-if="quickReplies.length" class="quick-replies">
       <button 
@@ -599,13 +723,17 @@ CORS(app, origins=["https://your-frontend-domain.com"])
 # OpenAI API
 OPENAI_API_KEY=sk-...
 
+# Qdrant Vector Database
+QDRANT_URL=https://your-qdrant-instance.cloud
+QDRANT_API_KEY=your-qdrant-api-key
+
 # Flask Configuration
 FLASK_SECRET_KEY=your-secret-key-here
 PORT=10000
 FLASK_DEBUG=False
 ```
 
-**Note:** Qdrant and Google API keys are no longer required (optimization update).
+**Note:** All environment variables are required for full functionality.
 
 ---
 
@@ -655,6 +783,11 @@ FLASK_DEBUG=False
    - Don't manually clear cookies
    - Use same domain for API and frontend
 
+7. **Render HTML formatting:**
+   - **MUST use `innerHTML` (JS) or `dangerouslySetInnerHTML` (React) or `v-html` (Vue)**
+   - Do NOT use `textContent` or `{{ }}` - this breaks formatting
+   - See "HTML Formatting in Responses" section above
+
 ---
 
 ## 🐛 **Common Issues & Solutions**
@@ -674,6 +807,12 @@ FLASK_DEBUG=False
 ### **Issue: Messages not showing after 10**
 **Solution:** Expected behavior, show premium prompt
 
+### **Issue: Bold text not rendering / Seeing `<b>` tags**
+**Solution:** Use `innerHTML` (JavaScript), `dangerouslySetInnerHTML` (React), or `v-html` (Vue). Do NOT use `textContent` or `{{ }}` interpolation.
+
+### **Issue: No line breaks between bullet points**
+**Solution:** Ensure HTML rendering is enabled. `<br>` tags need `innerHTML` to work.
+
 ---
 
 ## 📧 **Support**
@@ -682,7 +821,8 @@ For technical issues or questions, contact the backend team or refer to the main
 
 ---
 
-**Last Updated:** November 11, 2025  
-**API Version:** 1.0  
+**Last Updated:** November 13, 2025  
+**API Version:** 2.0  
 **Backend Framework:** Flask 3.0.0  
-**AI Model:** OpenAI GPT-3.5-turbo
+**AI Model:** OpenAI GPT-4o-mini  
+**Vector Database:** Qdrant Cloud
