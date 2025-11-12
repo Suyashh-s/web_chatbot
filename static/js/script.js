@@ -112,7 +112,7 @@ function addMessage(text, type, quickReplies = null) {
     
     const messageContent = document.createElement('div');
     messageContent.className = 'message-content';
-    messageContent.textContent = text;
+    messageContent.innerHTML = text;  // Changed from textContent to innerHTML to support HTML formatting
     
     const messageTime = document.createElement('div');
     messageTime.className = 'message-time';
