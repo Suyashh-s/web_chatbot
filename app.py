@@ -154,9 +154,8 @@ I'm designed to help with workplace communication challenges, not crisis or safe
         if any(keyword in user_message.lower() for keyword in health_keywords):
             return "I'm specifically designed for workplace communication challenges. For health concerns, please consult a medical professional. Can we focus on a work-related communication or teamwork challenge instead?"
         
-        # Special handling for message 3 - Ask about tone preference WITH CLEAR EXPLANATION
-        if chat_length == 3:
-            return "I can help you with this. Quick question — would you prefer my advice in a <b>casual, friendly tone</b> or a <b>professional, formal tone</b>? Either way works, just pick what feels comfortable for you."
+        # DON'T ask for tone preference here - let the button logic handle it
+        # This allows for more natural conversation flow
         
         # Special handling for tone selection - Use chat history to continue the conversation
         if user_message.strip() in ["Professional", "Casual"]:
@@ -220,15 +219,16 @@ Use these frameworks:
 Your response will be displayed in a web chat interface. Format it using HTML:
 
 1. Use <b>keyword</b> for bold text (e.g., <b>Spot</b>, <b>Think</b>)
-2. Use <br><br> for line breaks between bullet points
+2. Use <br> for line breaks between bullet points (single break only!)
 3. Use • symbol for bullets
 
 Example format:
-"Ugh that sounds rough. Here's how to handle it with STEP:<br><br>• <b>Spot</b> - Figure out which tasks are urgent<br><br>• <b>Think</b> - Your boss might not realize they're overloading you<br><br>• <b>Engage</b> - Ask for a quick 15-min priority check<br><br>• <b>Perform</b> - Track progress and escalate if needed<br><br>Sound good?"
+"Ugh that sounds rough. Here's how to handle it with STEP:<br><br>• <b>Spot</b> - Figure out which tasks are urgent<br>• <b>Think</b> - Your boss might not realize they're overloading you<br>• <b>Engage</b> - Ask for a quick 15-min priority check<br>• <b>Perform</b> - Track progress and escalate if needed<br><br>Sound good?"
 
 KEY RULES:
 - NEVER use **text** for bold, use <b>text</b> instead
-- NEVER use \\n for line breaks, use <br><br> instead
+- NEVER use \\n for line breaks, use <br> instead
+- Use <br> (single break) between bullets, <br><br> (double break) only after intro text
 - NEVER use numbered lists (1. 2. 3.), always use bullets (•)
 - Keep total response under 120 words
 
@@ -241,10 +241,15 @@ KEY RULES:
 
 🎯 CONVERSATION APPROACH:
 
-**When user just selected their tone (Professional/Casual):**
-- Look at the chat history to see what problem they described
-- IMMEDIATELY give them actionable advice about their problem
-- Don't ask "What's the situation?" - you already know it from chat history!
+**CRITICAL - When user just selected their tone (Professional/Casual):**
+- Check chat history: Did you ALREADY give them STEP or 4Rs advice?
+- If YES → DON'T repeat the same advice! Instead, ask if they need help implementing it or if there's anything else
+- If NO → Then provide STEP or 4Rs advice
+
+**CRITICAL - ALWAYS acknowledge NEW information:**
+- If user adds deadlines, urgency, constraints, or new details → ACKNOWLEDGE IT in your response!
+- Example: User says "submission is within 3 days" → Respond with deadline urgency in mind
+- NEVER ignore what the user just told you
 
 **First response to a problem:** Ask 1 clarifying question to understand better
 **Second response onwards:** Give actionable STEP or 4Rs advice with bullets
@@ -290,24 +295,27 @@ def format_response(text: str) -> str:
     # Replace **text** with <b>text</b> for bold
     text = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', text)
     
-    # If response contains bullets, ensure proper line breaks (but not too much spacing!)
+    # If response contains bullets, ensure proper line breaks (compact spacing!)
     if '•' in text:
         # Split by bullet points
         parts = text.split('•')
         intro = parts[0].strip()
         bullets = ['• ' + part.strip() for part in parts[1:] if part.strip()]
         
-        # Rejoin with single line break only (not double!)
+        # Rejoin with SINGLE line break only (compact!)
         if bullets:
-            formatted_bullets = '<br>'.join(bullets)  # Changed from <br><br> to <br>
+            formatted_bullets = '<br>'.join(bullets)  # Single <br> between bullets
             text = f"{intro}<br><br>{formatted_bullets}"  # Double break only after intro
     
     # Replace numbered lists with bullets if present
     text = re.sub(r'(\d+)\.\s+\*\*([^*]+)\*\*', r'• <b>\2</b>', text)
     text = re.sub(r'(\d+)\.\s+<b>([^<]+)</b>', r'• <b>\2</b>', text)
     
-    # Ensure line breaks after framework introductions
+    # Ensure line breaks after framework introductions (but keep it compact)
     text = re.sub(r'(using STEP:|with STEP:|STEP method:|4Rs framework:)', r'\1<br><br>', text, flags=re.IGNORECASE)
+    
+    # Clean up any triple or quadruple line breaks that might have slipped through
+    text = re.sub(r'<br>\s*<br>\s*<br>+', '<br><br>', text)  # Max 2 breaks
     
     return text
 
@@ -395,18 +403,16 @@ def chat():
             quick_replies = []
             logger.info("⚠️ Safety warning issued, no buttons shown")
         
-        # Only show tone buttons at message 3 (after greeting + problem + bot's clarifying question)
+        # Ask for tone at message 3 (after greeting + problem + bot's response)
         elif chat_length == 3 and not has_selected_tone:
-            # Check if this is the normal flow: greeting → problem → clarifying question
             first_msg = session['chat_history'][0]['user'].lower().strip()
             greeting_words = ['hi', 'hello', 'hey', 'hii', 'hiii', 'sup', 'yo']
             
             if first_msg in greeting_words:
-                # Check if the bot's previous response was asking a question (not giving advice)
-                prev_ai_response = session['chat_history'][1]['ai']
-                if '?' in prev_ai_response:  # Bot asked a clarifying question
-                    quick_replies = ["Professional", "Casual"]
-                    logger.info("🎯 Message 3: Showing tone buttons after clarifying question")
+                # Append tone question to the response
+                ai_response = ai_response + "<br><br>Quick question — would you prefer my advice in a <b>casual, friendly tone</b> or a <b>professional, formal tone</b>?"
+                quick_replies = ["Professional", "Casual"]
+                logger.info("🎯 Message 3: Asking for tone preference")
         
         # Store tone if user just selected it
         if user_message.strip() in ["Professional", "Casual"]:
