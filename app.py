@@ -1,13 +1,11 @@
 """
-Simple Web Chatbot - Uses Qdrant for context retrieval and OpenAI for responses
+Simple Web Chatbot - OpenAI only (optimized for speed)
 """
 
 import os
 from flask import Flask, render_template, request, jsonify, session
 from flask_cors import CORS
 from dotenv import load_dotenv
-from qdrant_client import QdrantClient
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from openai import OpenAI
 import logging
 from datetime import datetime
@@ -28,76 +26,47 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "your-secret-key")
 CORS(app)
 
 # Configuration
-QDRANT_URL = os.getenv("QDRANT_URL")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-COLLECTION_NAME = "bridgetext_scenarios"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # Global variables
-qdrant_client = None
-embeddings = None
 openai_client = None
 
 def initialize_services():
-    """Initialize Qdrant and OpenAI services"""
-    global qdrant_client, embeddings, openai_client
+    """Initialize OpenAI service"""
+    global openai_client
     
     try:
-        logger.info("🔌 Connecting to services...")
-        
-        # Initialize Qdrant client
-        qdrant_client = QdrantClient(
-            url=QDRANT_URL,
-            api_key=QDRANT_API_KEY
-        )
-        
-        # Initialize Google embeddings (768 dimensions to match your collection)
-        embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/embedding-001",
-            google_api_key=GOOGLE_API_KEY
-        )
+        logger.info("🔌 Connecting to OpenAI...")
         
         # Initialize OpenAI client
         openai_client = OpenAI(api_key=OPENAI_API_KEY)
         
-        logger.info("✅ All services initialized successfully")
+        logger.info("✅ OpenAI initialized successfully")
         return True
         
     except Exception as e:
         logger.error(f"❌ Failed to initialize services: {str(e)}")
         return False
 
-def get_relevant_context(user_message: str, top_k: int = 3) -> str:
-    """Retrieve relevant context from Qdrant"""
+def generate_response(user_message: str, chat_history: str = "", tone: str = "Professional") -> str:
+    """Generate response using OpenAI with STEP + 4Rs framework (NO context retrieval for speed)"""
     try:
-        # Generate embedding for user message
-        query_vector = embeddings.embed_query(user_message)
-        
-        # Search in Qdrant
-        search_results = qdrant_client.search(
-            collection_name=COLLECTION_NAME,
-            query_vector=query_vector,
-            limit=top_k
-        )
-        
-        # Extract context from results
-        context_parts = []
-        for result in search_results:
-            if hasattr(result, 'payload') and result.payload:
-                text = result.payload.get('text', '') or result.payload.get('page_content', '')
-                if text:
-                    context_parts.append(text)
-        
-        return "\n\n".join(context_parts) if context_parts else "No relevant context found."
-        
-    except Exception as e:
-        logger.error(f"Error retrieving context: {str(e)}")
-        return "No context available."
+        # Safety check - Harmful content
+        harmful_keywords = ['kill', 'murder', 'suicide', 'violence', 'assault', 'weapon', 'gun', 'knife', 'blood', 'attack', 'stab', 'abuse', 'threat', 'harass']
+        if any(keyword in user_message.lower() for keyword in harmful_keywords):
+            return """⚠️ I'm concerned about what you've shared. If you're in immediate danger or witnessing illegal activity, please contact:
 
-def generate_response(user_message: str, context: str, chat_history: str = "", tone: str = "Professional") -> str:
-    """Generate response using OpenAI with STEP + 4Rs framework"""
-    try:
+• Emergency Services: 911
+• National Suicide Prevention Lifeline: 988
+• Workplace Violence Hotline: 1-800-799-7233
+
+I'm designed to help with workplace communication challenges, not crisis or safety situations. Please reach out to professionals who can provide proper support."""
+        
+        # Safety check - Health issues
+        health_keywords = ['headache', 'sick', 'pain', 'fever', 'medication', 'doctor', 'hospital', 'injury', 'hurt']
+        if any(keyword in user_message.lower() for keyword in health_keywords):
+            return "I'm specifically designed for workplace communication challenges. For health concerns, please consult a medical professional. Can we focus on a work-related communication or teamwork challenge instead?"
+        
         # Special handling for tone selection
         if user_message.strip() in ["Professional", "Casual"]:
             selected_tone = user_message.strip()
@@ -201,9 +170,6 @@ Stay focused - get to the framework quickly, don't drag out empathy phase
 End efficiently - quick wrap-up, don't over-explain
 Your goal: Sound like a helpful friend who knows their stuff, not a customer service bot or corporate trainer answer as humans would have answered and repond with empathy.
 
-CONTEXT (Reference coaching scenarios from similar situations):
-{context}
-
 CHAT_HISTORY:
 {chat_history}
 
@@ -217,8 +183,8 @@ ANSWER:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
             ],
-            temperature=0.7,
-            max_tokens=300
+            temperature=0.6,
+            max_tokens=100
         )
         
         return response.choices[0].message.content.strip()
@@ -252,23 +218,30 @@ def chat():
         logger.info(f"📨 User: {user_message}")
         
         # Check if services are initialized
-        if not qdrant_client or not embeddings or not openai_client:
+        if not openai_client:
             logger.error("Services not initialized, attempting to reinitialize...")
             if not initialize_services():
-                return jsonify({'error': 'Services unavailable. Please try again later.'}), 503
+                return jsonify({'error': 'Services unavailable. Please try again later.', 'success': False}), 503
         
-        # Get relevant context from Qdrant
-        context = get_relevant_context(user_message)
+        # Check message limit (10 messages = 5 exchanges)
+        current_count = len(session.get('chat_history', []))
+        if current_count >= 10:
+            return jsonify({
+                'response': "You've reached the free message limit (10 messages). Upgrade to Premium for unlimited conversations! 🚀",
+                'limit_reached': True,
+                'quick_replies': [],
+                'success': True
+            })
         
         # Get chat history for context
         history = session.get('chat_history', [])
-        chat_history = "\n".join([f"User: {h['user']}\nAI: {h['ai']}" for h in history[-3:]])  # Last 3 exchanges
+        chat_history = "\n".join([f"User: {h['user']}\nAI: {h['ai']}" for h in history[-2:]])  # Last 2 exchanges
         
         # Get selected tone (default to Professional)
         selected_tone = session.get('tone', 'Professional')
         
-        # Generate response using OpenAI with the selected tone
-        ai_response = generate_response(user_message, context, chat_history, selected_tone)
+        # Generate response using OpenAI with the selected tone (NO Qdrant context retrieval)
+        ai_response = generate_response(user_message, chat_history, selected_tone)
         
         # Store in session history
         if 'chat_history' not in session:
@@ -372,9 +345,8 @@ def health():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'qdrant_connected': qdrant_client is not None,
-        'embeddings_ready': embeddings is not None,
         'openai_ready': openai_client is not None,
+        'optimized': 'Qdrant disabled for 2x faster responses',
         'timestamp': datetime.now().isoformat()
     })
 

@@ -1,21 +1,13 @@
 # Web Framework
 Flask==3.0.0
 Flask-Cors==4.0.0
-Werkzeug==3.1.3
 gunicorn==21.2.0
 
 # Environment & Configuration
 python-dotenv==1.0.0
 
-# Vector Database
-qdrant-client==1.15.1
-
-# LangChain packages removed - not needed for our use case
-# We use Google embeddings and OpenAI directly
-
-# AI/ML Integrations
+# AI/ML Integrations (OpenAI only for speed)
 openai>=2.0.0,<3.0.0
-google-generativeai>=0.7.0,<0.9.0
 
 # Utilities
 tiktoken>=0.12.0,<1.0.0
