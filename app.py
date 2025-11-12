@@ -147,7 +147,7 @@ I'm designed to help with workplace communication challenges, not crisis or safe
         
         # Special handling for message 3 - Ask about tone preference WITH CLEAR EXPLANATION
         if chat_length == 3:
-            return "I can help you with this. Quick question — would you prefer my advice in a **casual, friendly tone** or a **professional, formal tone**? Either way works, just pick what feels comfortable for you."
+            return "I can help you with this. Quick question — would you prefer my advice in a <b>casual, friendly tone</b> or a <b>professional, formal tone</b>? Either way works, just pick what feels comfortable for you."
         
         # Special handling for tone selection - Use chat history to continue the conversation
         if user_message.strip() in ["Professional", "Casual"]:
@@ -250,11 +250,44 @@ KEY RULES:
             max_tokens=200  # Increased to allow more detailed framework explanations
         )
         
-        return response.choices[0].message.content.strip()
+        raw_response = response.choices[0].message.content.strip()
+        
+        # POST-PROCESS: Force proper formatting if GPT didn't follow instructions
+        formatted_response = format_response(raw_response)
+        
+        return formatted_response
         
     except Exception as e:
         logger.error(f"Error generating response: {str(e)}")
         return "Sorry, I'm having trouble generating a response right now. Please try again."
+
+def format_response(text: str) -> str:
+    """Format response with proper HTML line breaks and bold text"""
+    import re
+    
+    # Replace **text** with <b>text</b> for bold
+    text = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', text)
+    
+    # If response contains bullets, ensure proper line breaks
+    if '•' in text:
+        # Split by bullet points
+        parts = text.split('•')
+        intro = parts[0].strip()
+        bullets = ['•' + part.strip() for part in parts[1:] if part.strip()]
+        
+        # Rejoin with proper HTML line breaks
+        if bullets:
+            formatted_bullets = '<br><br>'.join(bullets)
+            text = f"{intro}<br><br>{formatted_bullets}"
+    
+    # Replace numbered lists with bullets if present
+    text = re.sub(r'(\d+)\.\s+\*\*([^*]+)\*\*', r'• <b>\2</b>', text)
+    text = re.sub(r'(\d+)\.\s+<b>([^<]+)</b>', r'• <b>\2</b>', text)
+    
+    # Ensure line breaks after framework introductions
+    text = re.sub(r'(using STEP:|with STEP:|STEP method:|4Rs framework:)', r'\1<br><br>', text, flags=re.IGNORECASE)
+    
+    return text
 
 # Initialize services on startup
 initialize_services()
