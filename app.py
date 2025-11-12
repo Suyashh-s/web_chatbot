@@ -93,6 +93,15 @@ def get_relevant_context(user_message: str, top_k: int = 3) -> str:
 def generate_response(user_message: str, context: str, chat_history: str = "", tone: str = "Professional", chat_length: int = 0) -> str:
     """Generate response using GPT-4o-mini with STEP + 4Rs framework and Qdrant context"""
     try:
+        # Check if this is a greeting (first message)
+        greeting_words = ['hi', 'hello', 'hey', 'hii', 'hiii', 'sup', 'yo', 'helo', 'hola']
+        if user_message.lower().strip() in greeting_words and chat_length == 1:
+            # Return friendly, natural greeting based on tone
+            if tone == "Casual":
+                return "Hey! What's up? What's going on at work?"
+            else:
+                return "Hello! How can I help you with your workplace challenges today?"
+        
         # Safety check - Physical violence/abuse (CRITICAL) - Only if it's clearly physical violence
         # Improved: Check for context to avoid false positives (e.g., "beat me in workload")
         violence_keywords = ['hit', 'punch', 'slap', 'kick', 'physical violence', 'physically hurt', 'assault', 'attack', 'threatened with violence']
@@ -281,17 +290,17 @@ def format_response(text: str) -> str:
     # Replace **text** with <b>text</b> for bold
     text = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', text)
     
-    # If response contains bullets, ensure proper line breaks
+    # If response contains bullets, ensure proper line breaks (but not too much spacing!)
     if '•' in text:
         # Split by bullet points
         parts = text.split('•')
         intro = parts[0].strip()
-        bullets = ['•' + part.strip() for part in parts[1:] if part.strip()]
+        bullets = ['• ' + part.strip() for part in parts[1:] if part.strip()]
         
-        # Rejoin with proper HTML line breaks
+        # Rejoin with single line break only (not double!)
         if bullets:
-            formatted_bullets = '<br><br>'.join(bullets)
-            text = f"{intro}<br><br>{formatted_bullets}"
+            formatted_bullets = '<br>'.join(bullets)  # Changed from <br><br> to <br>
+            text = f"{intro}<br><br>{formatted_bullets}"  # Double break only after intro
     
     # Replace numbered lists with bullets if present
     text = re.sub(r'(\d+)\.\s+\*\*([^*]+)\*\*', r'• <b>\2</b>', text)
