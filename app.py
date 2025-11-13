@@ -249,18 +249,21 @@ KEY RULES:
 
 🎯 CONVERSATION APPROACH:
 
-**CRITICAL - When user just selected their tone (Professional/Casual):**
-- Check chat history: Did you ALREADY give them STEP or 4Rs advice?
-- If YES → DON'T repeat the same advice! Instead, ask if they need help implementing it or if there's anything else
-- If NO → Then provide STEP or 4Rs advice
+**When user JUST selected their tone (Professional/Casual):**
+- Look at the PREVIOUS message (before tone selection) to see what problem they described
+- Respond directly to THAT problem in the selected tone
+- Don't say "I understand this is challenging" - that's generic filler
+- Jump straight into helping with their specific issue
 
 **CRITICAL - ALWAYS acknowledge NEW information:**
 - If user adds deadlines, urgency, constraints, or new details → ACKNOWLEDGE IT in your response!
 - Example: User says "submission is within 3 days" → Respond with deadline urgency in mind
 - NEVER ignore what the user just told you
 
-**First response to a problem:** Ask 1 clarifying question to understand better
-**Second response onwards:** Give actionable STEP or 4Rs advice with bullets
+**General flow:**
+- First response to a problem: Ask 1 clarifying question
+- Second response onwards: Give actionable STEP or 4Rs advice with bullets
+- Keep responses SHORT and conversational
 
 ⸻
 
@@ -276,13 +279,13 @@ KEY RULES:
 **YOUR RESPONSE (Use <b> for bold, <br><br> between bullets):**"""
 
         response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",  # Using GPT-4o-mini for smarter responses
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
             ],
-            temperature=0.7,  # Slightly higher for more creative, natural responses
-            max_tokens=200  # Increased to allow more detailed framework explanations
+            temperature=0.5,  # Reduced from 0.7 for more consistent tone adherence
+            max_tokens=200
         )
         
         raw_response = response.choices[0].message.content.strip()
