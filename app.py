@@ -194,7 +194,8 @@ I'm designed to help with workplace communication challenges, not crisis or safe
 • Keep it SHORT and REAL - like you're texting, NOT writing an essay
 • Be supportive but chill: "Okay let's figure this out" NOT "I understand your concern"
 • NEVER say: "I appreciate", "However", "It's important to maintain", "effectively address"
-• Example CORRECT casual: "Ugh that really sucks. Sounds like you're feeling burned out? What's making you wanna quit - the work itself or something else?"
+• 🚨 AFTER TONE SELECTION: Give IMMEDIATE STEP or 4Rs advice - DON'T ask questions
+• Example CORRECT casual: "Ugh that really sucks. Here's what I'd do using STEP: First, spot what you can delegate..."
 """
         else:  # Professional
             tone_instruction = """⚠️ MANDATORY PROFESSIONAL TONE - DO NOT USE SLANG:
@@ -203,7 +204,8 @@ I'm designed to help with workplace communication challenges, not crisis or safe
 • Use phrases like: "I understand this is challenging", "That's a difficult situation", "Let's explore this together"
 • Be empathetic but maintain professional distance
 • NEVER use slang or casual phrases like "sucks", "ugh", "totally"
-• Example CORRECT professional: "That's a challenging situation. It sounds like communication barriers are impacting your work. Have you had an opportunity to address this directly with your colleague?"
+• 🚨 AFTER TONE SELECTION: Give IMMEDIATE STEP or 4Rs advice - DON'T ask questions
+• Example CORRECT professional: "That's challenging. Let me suggest a STEP framework approach: Begin by spotting which tasks have imminent deadlines..."
 """
         
         system_prompt = f"""You are a Gen Z workplace coach helping young professionals with work challenges.
@@ -399,22 +401,22 @@ def chat():
         
         quick_replies = []
         
-        # Store tone if user just selected it
-        if user_message.strip() in ["Professional", "Casual"]:
-            session['tone'] = user_message.strip()
+        # Store tone if user just selected it (check ORIGINAL message)
+        if original_user_message.strip() in ["Professional", "Casual"]:
+            session['tone'] = original_user_message.strip()
             session.modified = True
-            logger.info(f"✅ Tone '{user_message.strip()}' saved to session")
+            logger.info(f"✅ Tone '{original_user_message.strip()}' saved to session")
         
         # Never show buttons after safety warnings
         if is_safety_warning:
             quick_replies = []
             logger.info("⚠️ Safety warning - no buttons")
         
-        # Show tone selection after user describes a real problem (not just greetings)
+        # Show tone selection after user describes a real problem (check ORIGINAL message)
         elif not has_selected_tone and chat_length >= 2:
             # Check if this is NOT a greeting and NOT a tone selection
             greeting_words = ['hi', 'hello', 'hey', 'hii', 'hiii', 'sup', 'yo', 'professional', 'casual']
-            if user_message.lower().strip() not in greeting_words:
+            if original_user_message.lower().strip() not in greeting_words:
                 # User shared a real problem - ask for tone preference
                 ai_response = ai_response + "<br><br>Before we continue, how would you like me to respond? Pick your preferred tone:"
                 quick_replies = ["Professional", "Casual"]
