@@ -393,37 +393,33 @@ def chat():
         
         logger.info(f"✅ AI: {ai_response[:100]}...")
         
-        # Simplified quick reply flow
-        # DON'T show buttons if the response is a safety warning
+        # Smart quick reply flow
         is_safety_warning = ai_response.startswith("⚠️") or "call 911" in ai_response.lower()
-        
-        # Check if user has selected tone
         has_selected_tone = 'tone' in session and session['tone'] in ["Professional", "Casual"]
-        
-        quick_replies = []
         chat_length = len(session.get('chat_history', []))
         
-        if is_safety_warning:
-            # Never show buttons after safety warnings
-            quick_replies = []
-            logger.info("⚠️ Safety warning issued, no buttons shown")
-        
-        # Ask for tone at message 3 (after greeting + problem + bot's response)
-        elif chat_length == 3 and not has_selected_tone:
-            first_msg = session['chat_history'][0]['user'].lower().strip()
-            greeting_words = ['hi', 'hello', 'hey', 'hii', 'hiii', 'sup', 'yo']
-            
-            if first_msg in greeting_words:
-                # Append tone question to the response
-                ai_response = ai_response + "<br><br>Quick question — would you prefer my advice in a <b>casual, friendly tone</b> or a <b>professional, formal tone</b>?"
-                quick_replies = ["Professional", "Casual"]
-                logger.info("🎯 Message 3: Asking for tone preference")
+        quick_replies = []
         
         # Store tone if user just selected it
         if user_message.strip() in ["Professional", "Casual"]:
             session['tone'] = user_message.strip()
             session.modified = True
             logger.info(f"✅ Tone '{user_message.strip()}' saved to session")
+        
+        # Never show buttons after safety warnings
+        if is_safety_warning:
+            quick_replies = []
+            logger.info("⚠️ Safety warning - no buttons")
+        
+        # Show tone selection after user describes a real problem (not just greetings)
+        elif not has_selected_tone and chat_length >= 2:
+            # Check if this is NOT a greeting and NOT a tone selection
+            greeting_words = ['hi', 'hello', 'hey', 'hii', 'hiii', 'sup', 'yo', 'professional', 'casual']
+            if user_message.lower().strip() not in greeting_words:
+                # User shared a real problem - ask for tone preference
+                ai_response = ai_response + "<br><br>Before we continue, how would you like me to respond? Pick your preferred tone:"
+                quick_replies = ["Professional", "Casual"]
+                logger.info(f"🎯 Chat #{chat_length}: Asking for tone after real query")
         
         return jsonify({
             'response': ai_response,
