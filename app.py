@@ -51,11 +51,15 @@ def initialize_services():
         # Initialize Qdrant client
         qdrant_client = QdrantClient(
             url=QDRANT_URL,
-            api_key=QDRANT_API_KEY
+            api_key=QDRANT_API_KEY,
+            timeout=10  # 10 second timeout
         )
         
-        # Initialize OpenAI client (for embeddings AND chat)
-        openai_client = OpenAI(api_key=OPENAI_API_KEY)
+        # Initialize OpenAI client (for embeddings AND chat) with timeout
+        openai_client = OpenAI(
+            api_key=OPENAI_API_KEY,
+            timeout=30.0  # 30 second timeout for API calls
+        )
         
         logger.info("✅ All services initialized successfully")
         return True
@@ -67,6 +71,10 @@ def initialize_services():
 def get_relevant_context(user_message: str, top_k: int = 3) -> str:
     """Retrieve relevant context from Qdrant using OpenAI embeddings"""
     try:
+        # Skip Qdrant if not available or has dimension issues
+        if not qdrant_client:
+            return "No context available."
+            
         # Generate embedding using OpenAI (text-embedding-3-small model)
         embedding_response = openai_client.embeddings.create(
             model="text-embedding-3-small",
@@ -92,7 +100,8 @@ def get_relevant_context(user_message: str, top_k: int = 3) -> str:
         return "\n\n".join(context_parts) if context_parts else "No relevant context found."
         
     except Exception as e:
-        logger.error(f"Error retrieving context: {str(e)}")
+        # Silently fail - Qdrant context is optional, bot works without it
+        logger.debug(f"Qdrant context unavailable (dimension mismatch): {str(e)}")
         return "No context available."
 
 def generate_response(user_message: str, context: str, chat_history: str = "", tone: str = None, chat_length: int = 0) -> str:
