@@ -76,11 +76,12 @@ def get_relevant_context(user_message: str, top_k: int = 3) -> str:
             logger.warning("Qdrant client not initialized")
             return "No context available."
             
-        # Generate embedding using OpenAI - Use text-embedding-ada-002 for 768 dimensions
-        # (text-embedding-3-small creates 1536 dims, but Qdrant collection expects 768)
+        # Generate embedding using OpenAI - Reduce dimensions to 768 to match Qdrant
+        # text-embedding-3-small supports dimension parameter to reduce from 1536 to 768
         embedding_response = openai_client.embeddings.create(
-            model="text-embedding-ada-002",  # This model creates 768-dim vectors
-            input=user_message
+            model="text-embedding-3-small",
+            input=user_message,
+            dimensions=768  # Reduce to 768 to match Qdrant collection
         )
         query_vector = embedding_response.data[0].embedding
         
@@ -97,11 +98,23 @@ def get_relevant_context(user_message: str, top_k: int = 3) -> str:
         
         # Extract context from results
         context_parts = []
-        for result in search_results:
+        for idx, result in enumerate(search_results):
             if hasattr(result, 'payload') and result.payload:
-                text = result.payload.get('text', '') or result.payload.get('page_content', '')
+                # Log what fields exist in the payload
+                logger.info(f"Result {idx+1} payload keys: {list(result.payload.keys())}")
+                
+                # Try common field names for text content
+                text = (result.payload.get('text') or 
+                       result.payload.get('page_content') or 
+                       result.payload.get('content') or
+                       result.payload.get('scenario') or
+                       result.payload.get('description') or '')
+                
                 if text:
                     context_parts.append(text)
+                    logger.info(f"  ✓ Found text in result {idx+1}: {text[:100]}...")
+                else:
+                    logger.warning(f"  ✗ No text found in result {idx+1} payload: {result.payload}")
         
         if context_parts:
             logger.info(f"✅ Successfully retrieved {len(context_parts)} context items from Qdrant")
