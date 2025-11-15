@@ -71,16 +71,20 @@ def initialize_services():
 def get_relevant_context(user_message: str, top_k: int = 3) -> str:
     """Retrieve relevant context from Qdrant using OpenAI embeddings"""
     try:
-        # Skip Qdrant if not available or has dimension issues
+        # Skip Qdrant if not available
         if not qdrant_client:
+            logger.warning("Qdrant client not initialized")
             return "No context available."
             
-        # Generate embedding using OpenAI (text-embedding-3-small model)
+        # Generate embedding using OpenAI - Use text-embedding-ada-002 for 768 dimensions
+        # (text-embedding-3-small creates 1536 dims, but Qdrant collection expects 768)
         embedding_response = openai_client.embeddings.create(
-            model="text-embedding-3-small",
+            model="text-embedding-ada-002",  # This model creates 768-dim vectors
             input=user_message
         )
         query_vector = embedding_response.data[0].embedding
+        
+        logger.info(f"Generated embedding with {len(query_vector)} dimensions")
         
         # Search in Qdrant
         search_results = qdrant_client.search(
@@ -88,6 +92,8 @@ def get_relevant_context(user_message: str, top_k: int = 3) -> str:
             query_vector=query_vector,
             limit=top_k
         )
+        
+        logger.info(f"Found {len(search_results)} results from Qdrant")
         
         # Extract context from results
         context_parts = []
@@ -97,11 +103,16 @@ def get_relevant_context(user_message: str, top_k: int = 3) -> str:
                 if text:
                     context_parts.append(text)
         
-        return "\n\n".join(context_parts) if context_parts else "No relevant context found."
+        if context_parts:
+            logger.info(f"✅ Successfully retrieved {len(context_parts)} context items from Qdrant")
+            return "\n\n".join(context_parts)
+        else:
+            logger.warning("No context found in Qdrant results")
+            return "No relevant context found."
         
     except Exception as e:
-        # Silently fail - Qdrant context is optional, bot works without it
-        logger.debug(f"Qdrant context unavailable (dimension mismatch): {str(e)}")
+        # This is a critical error - bot SHOULD use Qdrant context
+        logger.error(f"❌ CRITICAL: Failed to get Qdrant context: {str(e)}")
         return "No context available."
 
 def generate_response(user_message: str, context: str, chat_history: str = "", tone: str = None, chat_length: int = 0) -> str:
