@@ -25,6 +25,13 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "your-secret-key")
 
+# Fix cross-site cookie issues for Chrome, Safari, Edge
+app.config.update(
+    SESSION_COOKIE_SAMESITE="None",  # Allow cookies on cross-domain requests
+    SESSION_COOKIE_SECURE=True,      # Required when SameSite=None (HTTPS only)
+    SESSION_COOKIE_HTTPONLY=True,    # Prevent XSS attacks
+)
+
 # Configure CORS for specific origins from environment variable
 cors_origins = os.getenv("CORS_ORIGINS", "").split(",")
 CORS(app, 
